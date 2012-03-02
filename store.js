@@ -37,19 +37,19 @@ RamStore.prototype.put = function(key, headers) {
     })
     return stream
 }
-RamStore.prototype.get = function(key) {
+RamStore.prototype.get = function(key, callback) {
     console.log("Getting %s", key)
     var self = this
     var item = self.items[key]
     if (null == item || undefined == item) {
-        return null
+        callback("not found", null)
     } else {
         var stream = new MemoryStream()
         timers.setTimeout(function() {
             stream.write(item.data)
             stream.end()
         }, 100)
-        return new Streamable(item.headers, stream)
+        callback(null, new Streamable(item.headers, stream))
     }
 }
 
@@ -91,7 +91,7 @@ S3Store.prototype.put = function(key, headers, callback) {
     });
     return stream
 }
-S3Store.prototype.get = function(key) {
+S3Store.prototype.get = function(key, callback) {
     console.log("Getting %s", key)
     var self = this
     var stream = new MemoryStream()
@@ -99,9 +99,16 @@ S3Store.prototype.get = function(key) {
         console.log(res.statusCode);
         console.log(res.headers);
         res.setEncoding('utf8');
-        res.pipe(stream)
+        var item = new Streamable({}, res)
+        for (h in res.headers) {
+            if (h == 'content-type' || h[0] == 'X' || h[0] == 'x') {
+                var val = res.headers[h]
+                console.log('reading header %s as %s', h, val)
+                item.headers[h] = val
+            }
+        }
+        callback(null, item)
     }).end();
-    return new Streamable({}, stream)
 }
 
 
@@ -125,19 +132,20 @@ var app = express.createServer()
 app.use(express.bodyParser())
 app.get('/:key', function(req, res) {
     var key = req.params.key;
-    var item = store.get(key)
-    if (null == item) {
-        res.header('content-type', 'text/plain')
-        res.send("Not found\n", 404)
-    } else {
-        for (h in item.headers) {
-            var val = item.headers[h]
-            console.log('setting header %s to %s', h, val)
-            res.header(h, val)
+    store.get(key, function(err, item) {
+        if (null == item) {
+            res.header('content-type', 'text/plain')
+            res.send("Not found\n", 404)
+        } else {
+            for (h in item.headers) {
+                var val = item.headers[h]
+                console.log('setting header %s to %s', h, val)
+                res.header(h, val)
+            }
+            var stream = item.stream
+            stream.pipe(res)
         }
-        var stream = item.stream
-        stream.pipe(res)
-    }
+    })
 })
 app.put('/:key', function(req, res) {
     var key = req.params.key;
