@@ -94,17 +94,14 @@ S3Store.prototype.put = function(key, headers, callback) {
 S3Store.prototype.get = function(key) {
     console.log("Getting %s", key)
     var self = this
-    var item = self.items[key]
-    if (null == item || undefined == item) {
-        return null
-    } else {
-        var stream = new MemoryStream()
-        timers.setTimeout(function() {
-            stream.write(item.data)
-            stream.end()
-        }, 100)
-        return new Streamable(item.headers, stream)
-    }
+    var stream = new MemoryStream()
+    self.client.get('data/' + key).on('response', function(res){
+        console.log(res.statusCode);
+        console.log(res.headers);
+        res.setEncoding('utf8');
+        res.pipe(stream)
+    }).end();
+    return new Streamable({}, stream)
 }
 
 
