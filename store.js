@@ -12,13 +12,13 @@ function Streamable(headers, stream) {
     this.stream = stream
 }
 
-function ItemStore() {
+function RamStore() {
     this.items = {
         key1 : new Item({ 'content-type': 'text/plain' }, "my data"),
         key2 : new Item({ 'content-type': 'text/turtle' }, "my other data")   
     }
 }
-ItemStore.prototype.put = function(key, headers) {
+RamStore.prototype.put = function(key, headers) {
     console.log("Putting %s with headers %j", key, headers)
     var self = this
     var newItem = new Item({}, "")
@@ -37,7 +37,7 @@ ItemStore.prototype.put = function(key, headers) {
     })
     return stream
 }
-ItemStore.prototype.get = function(key) {
+RamStore.prototype.get = function(key) {
     console.log("Getting %s", key)
     var self = this
     var item = self.items[key]
@@ -53,7 +53,76 @@ ItemStore.prototype.get = function(key) {
     }
 }
 
-var store = new ItemStore()
+var S3_KEY = process.env.AWS_ACCESS_KEY_ID;
+var S3_SECRET = process.env.AWS_SECRET_ACCESS_KEY;
+var S3_BUCKET = 'ccare';
+
+
+function S3Store() {
+    this.client = require('knox').createClient({
+        key: S3_KEY,
+        secret: S3_SECRET,
+        bucket: S3_BUCKET
+    });
+}
+
+var s3client = require('knox').createClient({
+    key: S3_KEY,
+    secret: S3_SECRET,
+    bucket: S3_BUCKET
+});
+
+S3Store.prototype.put = function(key, headers, callback) {
+    console.log("Putting %s with headers %j", key, headers)
+    var self = this
+    var contentLength = headers['content-length']
+    if (contentLength == null) {
+        throw "content length needed"
+    }
+    var stream = self.client.put('data/' + key,
+        {'content-length' : contentLength});
+    stream.on('response', function(res){
+      console.log("resp %s", res.statusCode);
+      callback(null, res)
+    });
+    stream.on('error', function(err){
+      console.log("err %s", err);
+      callback(err, null)
+    });
+    return stream
+}
+S3Store.prototype.get = function(key) {
+    console.log("Getting %s", key)
+    var self = this
+    var item = self.items[key]
+    if (null == item || undefined == item) {
+        return null
+    } else {
+        var stream = new MemoryStream()
+        timers.setTimeout(function() {
+            stream.write(item.data)
+            stream.end()
+        }, 100)
+        return new Streamable(item.headers, stream)
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+var store = new S3Store()
 
 var app = express.createServer()
 app.use(express.bodyParser())
@@ -75,8 +144,9 @@ app.get('/:key', function(req, res) {
 })
 app.put('/:key', function(req, res) {
     var key = req.params.key;
-    var stream = store.put(key, req.headers)
+    var stream = store.put(key, req.headers, function(storeErr, storeRes) {
+        res.send('stored', 201)
+    })
     req.pipe(stream)
-    res.send('stored', 201)
 })
 app.listen(3000)
